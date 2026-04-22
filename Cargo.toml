@@ -14,7 +14,7 @@ exclude = ["data/", "docs/", "lme-benches/", ".fastembed_cache/", ".github/", "s
 
 [features]
 default = ["server", "startup-sound", "llm-extraction"]
-server = ["dep:axum", "dep:env_logger", "dep:log", "dep:tokio", "mcp/server", "dep:rcgen", "dep:axum-server", "dep:rustls-pemfile", "dep:reqwest", "dep:rustls"]
+server = ["dep:axum", "dep:log", "dep:tokio", "mcp/server", "dep:rcgen", "dep:axum-server", "dep:rustls-pemfile", "dep:reqwest", "dep:rustls", "dep:tracing", "dep:tracing-subscriber", "dep:tracing-log", "dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 startup-sound = ["dep:rodio"]
 local-embeddings = ["dep:fastembed", "dep:rustls"]
 llm-extraction = ["dep:openai-rust2", "dep:anyhow"]
@@ -38,7 +38,6 @@ uuid = { version = "1.22.0", features = ["v4", "serde"] }
 mcp = { package = "cloudllm_mcp", version = "0.1.0" }
 axum = { version = "0.8.8", optional = true }
 axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
-env_logger = { version = "0.11.8", optional = true }
 log = { version = "0.4.28", optional = true }
 rcgen = { version = "0.14", optional = true }
 rustls-pemfile = { version = "2", optional = true }
@@ -54,6 +53,13 @@ openai-rust2 = { version = "1.7.2", optional = true }
 anyhow = { version = "1", optional = true }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 walkdir = "2.5"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"], optional = true }
+tracing-log = { version = "0.2", optional = true }
+tracing-opentelemetry = { version = "0.28", optional = true }
+opentelemetry = { version = "0.27", features = ["trace", "metrics", "logs"], optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "trace", "metrics", "logs"], optional = true }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["http-proto", "reqwest-client", "trace", "metrics", "logs"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
