@@ -1499,6 +1499,38 @@ pub(crate) async fn start_dashboard_server(
     start_tls_router(addr, dashboard_router(state), cert_path, key_path).await
 }
 
+/// Tower/axum middleware that emits a `mentisdb.rest.request.count` metric for
+/// every REST request, tagged with the matched route pattern and response
+/// status family.
+///
+/// Applied via `.route_layer(from_fn(...))` so that `MatchedPath` is
+/// populated by axum's router before the middleware runs.
+async fn rest_metrics_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let response = next.run(request).await;
+    let status_code = response.status().as_u16();
+    let status = if response.status().is_success() {
+        "ok"
+    } else {
+        "err"
+    };
+    tracing::info!(
+        counter.mentisdb_rest_request = 1_u64,
+        route = %route,
+        status = %status,
+        status_code = status_code,
+        "rest request"
+    );
+    response
+}
+
 /// Build the REST router pre-wired to an existing [`MentisDbService`] arc.
 ///
 /// This is a private companion to [`rest_router`] that avoids constructing a
@@ -1566,6 +1598,7 @@ fn rest_router_with_service(service: Arc<MentisDbService>) -> Router {
         .route("/v1/webhooks", post(rest_register_webhook_handler))
         .route("/v1/webhooks/{id}", delete(rest_delete_webhook_handler))
         .route("/v1/extract-memories", post(rest_extract_memories_handler))
+        .route_layer(axum::middleware::from_fn(rest_metrics_middleware))
         .with_state(service)
 }
 
@@ -1810,6 +1843,7 @@ pub fn rest_router(config: MentisDbServiceConfig) -> Router {
         .route("/v1/webhooks", post(rest_register_webhook_handler))
         .route("/v1/webhooks/{id}", delete(rest_delete_webhook_handler))
         .route("/v1/extract-memories", post(rest_extract_memories_handler))
+        .route_layer(axum::middleware::from_fn(rest_metrics_middleware))
         .with_state(service)
 }
 
