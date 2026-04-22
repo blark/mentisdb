@@ -60,6 +60,7 @@ tracing-opentelemetry = { version = "0.28", optional = true }
 opentelemetry = { version = "0.27", features = ["trace", "metrics", "logs"], optional = true }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "trace", "metrics", "logs"], optional = true }
 opentelemetry-otlp = { version = "0.27", default-features = false, features = ["http-proto", "reqwest-client", "trace", "metrics", "logs"], optional = true }
+thiserror = "1.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
