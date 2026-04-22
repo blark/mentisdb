@@ -96,6 +96,8 @@ use axum_server::tls_rustls::RustlsConfig;
 use rcgen::{date_time_ymd, CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use tracing::Instrument;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
@@ -1935,7 +1937,16 @@ impl ToolProtocol for MentisDbMcpProtocol {
         tool_name: &str,
         parameters: Value,
     ) -> Result<ToolResult, Box<dyn Error + Send + Sync>> {
-        let output = match canonical_tool_name(tool_name) {
+        let canonical = canonical_tool_name(tool_name).to_string();
+        let start = Instant::now();
+        let span = tracing::info_span!(
+            "mcp.tool_call",
+            tool = %canonical,
+            status = tracing::field::Empty,
+        );
+
+        let result = async {
+        match canonical.as_str() {
             "mentisdb_bootstrap" => {
                 parse_and_call(parameters, |request| self.service.bootstrap(request)).await
             }
@@ -2073,10 +2084,26 @@ impl ToolProtocol for MentisDbMcpProtocol {
                 parse_and_call(parameters, |request| self.service.extract_memories(request)).await
             }
             _ => {
-                return Err(Box::new(ToolError::NotFound(tool_name.to_string())));
+                Err(Box::new(ToolError::NotFound(tool_name.to_string()))
+                    as Box<dyn Error + Send + Sync>)
             }
-        }?;
+        }
+        }
+        .instrument(span.clone())
+        .await;
 
+        let elapsed_ms = start.elapsed().as_millis() as f64;
+        let status = if result.is_ok() { "ok" } else { "err" };
+        span.record("status", status);
+        tracing::info!(
+            counter.mentisdb_mcp_tool_call = 1_u64,
+            histogram.mentisdb_mcp_tool_call_duration_ms = elapsed_ms,
+            tool = %canonical,
+            status = %status,
+            "mcp tool call completed"
+        );
+
+        let output = result?;
         Ok(ToolResult::success(output))
     }
 
