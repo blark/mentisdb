@@ -2206,6 +2206,14 @@ fn emit_thought_append(chain_key: &str, thought_type: ThoughtType, agent_id: &st
     );
 }
 
+fn result_bucket(n: usize) -> &'static str {
+    match n {
+        0 => "empty",
+        1..=10 => "small",
+        _ => "large",
+    }
+}
+
 impl MentisDbService {
     /// Create a new `MentisDbService` from a service configuration.
     ///
@@ -2587,6 +2595,8 @@ impl MentisDbService {
         &self,
         request: LexicalSearchRequest,
     ) -> Result<LexicalSearchResponse, Box<dyn Error + Send + Sync>> {
+        let __search_start = std::time::Instant::now();
+        let __search_method = "lexical";
         let chain_key = self.resolve_chain_key(request.chain_key.as_deref());
         let chain = self.get_chain(Some(&chain_key), None).await?;
         let chain = chain.read().await;
@@ -2633,13 +2643,26 @@ impl MentisDbService {
                     .collect(),
             })
             .collect();
-        Ok(LexicalSearchResponse { results, total })
+        let response = LexicalSearchResponse { results, total };
+        let bucket = result_bucket(response.results.len());
+        let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+        tracing::info!(
+            counter.mentisdb_search = 1_u64,
+            histogram.mentisdb_search_duration_ms = elapsed_ms,
+            histogram.mentisdb_search_results_returned = response.results.len() as f64,
+            method = %__search_method,
+            result_bucket = %bucket,
+            "search completed"
+        );
+        Ok(response)
     }
 
     async fn ranked_search(
         &self,
         request: RankedSearchRequest,
     ) -> Result<RankedSearchResponse, Box<dyn Error + Send + Sync>> {
+        let __search_start = std::time::Instant::now();
+        let __search_method = "ranked";
         let chain_key = self.resolve_chain_key(request.chain_key.as_deref());
         let offset = request.offset.unwrap_or(0);
         let page_size = request.limit.unwrap_or(50).max(1);
@@ -2763,11 +2786,22 @@ impl MentisDbService {
             })
             .collect();
 
-        Ok(RankedSearchResponse {
+        let response = RankedSearchResponse {
             backend: best_backend,
             total: total_candidates,
             results,
-        })
+        };
+        let bucket = result_bucket(response.results.len());
+        let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+        tracing::info!(
+            counter.mentisdb_search = 1_u64,
+            histogram.mentisdb_search_duration_ms = elapsed_ms,
+            histogram.mentisdb_search_results_returned = response.results.len() as f64,
+            method = %__search_method,
+            result_bucket = %bucket,
+            "search completed"
+        );
+        Ok(response)
     }
 
     /// Run federated ranked search over multiple chains simultaneously.
@@ -2779,15 +2813,27 @@ impl MentisDbService {
         &self,
         request: FederatedSearchRequest,
     ) -> Result<RankedSearchResponse, Box<dyn Error + Send + Sync>> {
+        let __search_start = std::time::Instant::now();
+        let __search_method = "federated";
         use crate::search::ranked::RRF_K;
         use std::collections::BTreeMap;
 
         if request.chain_keys.is_empty() {
-            return Ok(RankedSearchResponse {
+            let response = RankedSearchResponse {
                 backend: String::new(),
                 total: 0,
                 results: Vec::new(),
-            });
+            };
+            let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+            tracing::info!(
+                counter.mentisdb_search = 1_u64,
+                histogram.mentisdb_search_duration_ms = elapsed_ms,
+                histogram.mentisdb_search_results_returned = 0_f64,
+                method = %__search_method,
+                result_bucket = %"empty",
+                "search completed"
+            );
+            return Ok(response);
         }
 
         let offset = request.offset.unwrap_or(0);
@@ -2862,11 +2908,21 @@ impl MentisDbService {
         }
 
         if chain_arcs.is_empty() {
-            return Ok(RankedSearchResponse {
+            let response = RankedSearchResponse {
                 backend: String::new(),
                 total: 0,
                 results: Vec::new(),
-            });
+            };
+            let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+            tracing::info!(
+                counter.mentisdb_search = 1_u64,
+                histogram.mentisdb_search_duration_ms = elapsed_ms,
+                histogram.mentisdb_search_results_returned = 0_f64,
+                method = %__search_method,
+                result_bucket = %"empty",
+                "search completed"
+            );
+            return Ok(response);
         }
 
         // Do the searches and collect owned data in spawn_blocking
@@ -3077,17 +3133,30 @@ impl MentisDbService {
             )
             .collect();
 
-        Ok(RankedSearchResponse {
+        let response = RankedSearchResponse {
             backend: best_backend.as_str().to_string(),
             total: total_candidates,
             results,
-        })
+        };
+        let bucket = result_bucket(response.results.len());
+        let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+        tracing::info!(
+            counter.mentisdb_search = 1_u64,
+            histogram.mentisdb_search_duration_ms = elapsed_ms,
+            histogram.mentisdb_search_results_returned = response.results.len() as f64,
+            method = %__search_method,
+            result_bucket = %bucket,
+            "search completed"
+        );
+        Ok(response)
     }
 
     async fn context_bundles(
         &self,
         request: RankedSearchRequest,
     ) -> Result<ContextBundlesResponse, Box<dyn Error + Send + Sync>> {
+        let __search_start = std::time::Instant::now();
+        let __search_method = "context_bundles";
         let chain_key = self.resolve_chain_key(request.chain_key.as_deref());
         let chain = self.get_chain(Some(&chain_key), None).await?;
         let chain = chain.read().await;
@@ -3170,11 +3239,22 @@ impl MentisDbService {
             })
             .collect();
 
-        Ok(ContextBundlesResponse {
+        let response = ContextBundlesResponse {
             total_bundles,
             consumed_hits,
             bundles,
-        })
+        };
+        let bucket = result_bucket(response.bundles.len());
+        let elapsed_ms = __search_start.elapsed().as_millis() as f64;
+        tracing::info!(
+            counter.mentisdb_search = 1_u64,
+            histogram.mentisdb_search_duration_ms = elapsed_ms,
+            histogram.mentisdb_search_results_returned = response.bundles.len() as f64,
+            method = %__search_method,
+            result_bucket = %bucket,
+            "search completed"
+        );
+        Ok(response)
     }
 
     async fn list_chains_json(&self) -> Result<Value, Box<dyn Error + Send + Sync>> {
