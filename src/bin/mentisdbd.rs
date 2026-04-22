@@ -1,7 +1,7 @@
 //! Headless MentisDb daemon.
 //!
 //! Runs the MCP server (HTTP + optional HTTPS) and REST surface. All operator
-//! output goes to stdout/stderr via `env_logger`. No TUI.
+//! output goes to stdout/stderr via `tracing-subscriber`. No TUI.
 //!
 //! Configuration is read from environment variables:
 //!
@@ -22,12 +22,12 @@
 //! - `MENTISDB_UPDATE_REPO` (default `CloudLLM-ai/mentisdb`)
 //! - `RUST_LOG`
 
-use env_logger::Env;
 use mcp::ToolProtocol;
 use mentisdb::server::{
     adopt_legacy_default_mentisdb_dir, start_servers, MentisDbMcpProtocol, MentisDbServerConfig,
     MentisDbService,
 };
+use mentisdb::telemetry;
 use mentisdb::{
     migrate_chain_hash_algorithm, migrate_registered_chains_with_adapter, migrate_skill_registry,
     refresh_registered_chain_counts, MentisDbMigrationEvent,
@@ -75,14 +75,6 @@ fn raise_fd_limit() {
 
 #[cfg(not(unix))]
 fn raise_fd_limit() {}
-
-// ── Logging ─────────────────────────────────────────────────────────────────
-
-fn init_logger() {
-    let mut builder = env_logger::Builder::from_env(Env::default().default_filter_or("info"));
-    builder.format_timestamp_millis();
-    let _ = builder.try_init();
-}
 
 // ── Env helpers ─────────────────────────────────────────────────────────────
 
@@ -288,7 +280,6 @@ async fn proxy_jsonrpc_to_daemon(mcp_addr: &str, request: &str) -> Option<String
 async fn run_stdio_mode(
     config: MentisDbServerConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    init_logger();
     let mcp_addr = config.mcp_addr.to_string();
 
     if is_daemon_running(&mcp_addr) {
@@ -476,7 +467,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "server")]
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    init_logger();
     raise_fd_limit();
 
     log::info!(
@@ -656,6 +646,7 @@ pub(crate) fn run_cli_subcommand_with_io(
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let _telemetry = telemetry::init().expect("telemetry init failed");
     match parse_daemon_args(std::env::args_os().skip(1)) {
         Ok(DaemonArgMode::Help) => {
             println!("{}", daemon_help_text());
@@ -669,7 +660,6 @@ async fn main() -> ExitCode {
             }
         },
         Ok(DaemonArgMode::Stdio) => {
-            init_logger();
             let config = MentisDbServerConfig::from_env();
             match run_stdio_mode(config).await {
                 Ok(()) => ExitCode::SUCCESS,
@@ -680,7 +670,6 @@ async fn main() -> ExitCode {
             }
         }
         Ok(DaemonArgMode::Both) => {
-            init_logger();
             let config = MentisDbServerConfig::from_env();
             let stdio_handle = tokio::spawn(async move { run_stdio_mode(config.clone()).await });
             let http_handle = tokio::spawn(async move { run().await });

@@ -11,7 +11,7 @@
 use std::io::IsTerminal;
 
 use tracing_log::LogTracer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
 /// Errors that can occur during telemetry initialization.
 #[derive(Debug, thiserror::Error)]
@@ -43,31 +43,37 @@ impl Drop for TelemetryGuard {
 /// exports. Safe to call once per process; returns
 /// `TelemetryInitError::AlreadyInitialized` on subsequent calls.
 pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
-    // Bridge upstream `log::…!` macros into tracing.
-    // Ignore the error if already initialized (e.g., in tests where
-    // multiple test functions share a process).
+    // Set the log→tracing bridge first so `log::…!` macros are captured.
+    // Ignore the error — in tests, multiple calls share a process and this
+    // will have already been set.
     let _ = LogTracer::init();
 
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
+    // Use set_global_default directly to avoid try_init() also calling
+    // LogTracer::init() internally, which would conflict with the call above.
+    let subscriber: Box<dyn tracing::Subscriber + Send + Sync>;
     if std::io::stdout().is_terminal() {
-        Registry::default()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer().with_ansi(true))
-            .try_init()
-            .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
+        subscriber = Box::new(
+            Registry::default()
+                .with(env_filter)
+                .with(tracing_subscriber::fmt::layer().with_ansi(true)),
+        );
     } else {
-        Registry::default()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_ansi(false),
-            )
-            .try_init()
-            .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
+        subscriber = Box::new(
+            Registry::default()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_ansi(false),
+                ),
+        );
     }
+
+    tracing::subscriber::set_global_default(subscriber)
+        .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
 
     Ok(TelemetryGuard { _private: () })
 }
