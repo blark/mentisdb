@@ -2182,6 +2182,20 @@ impl ToolProtocol for MentisDbMcpProtocol {
     }
 }
 
+/// Emit the `mentisdb.agent.activity.count` metric event.
+///
+/// Called from service methods after `resolve_agent_identity` succeeds.
+/// `operation` should be one of: "append", "search", "read",
+/// "skill_invoke", "admin".
+fn emit_agent_activity(agent_id: &str, operation: &str) {
+    tracing::info!(
+        counter.mentisdb_agent_activity = 1_u64,
+        agent_id = %agent_id,
+        operation = %operation,
+        "agent activity"
+    );
+}
+
 impl MentisDbService {
     /// Create a new `MentisDbService` from a service configuration.
     ///
@@ -2314,6 +2328,7 @@ impl MentisDbService {
                 "system",
                 "MentisDB",
             );
+            emit_agent_activity(&agent_id, "admin");
             let input = ThoughtInput::new(ThoughtType::Summary, request.content)
                 .with_agent_name(agent_name)
                 .with_role(ThoughtRole::Checkpoint)
@@ -2396,6 +2411,7 @@ impl MentisDbService {
             &fallback_agent_id,
             &fallback_agent_id,
         );
+        emit_agent_activity(&agent_id, "append");
 
         let mut input = ThoughtInput::new(thought_type, request.content)
             .with_agent_name(agent_name)
@@ -2488,6 +2504,7 @@ impl MentisDbService {
             &fallback_agent_id,
             &fallback_agent_id,
         );
+        emit_agent_activity(&agent_id, "append");
 
         let mut input = ThoughtInput::new(thought_type, request.content)
             .with_agent_name(agent_name)
