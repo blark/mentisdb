@@ -13,6 +13,7 @@ fn init_succeeds_without_otlp_env() {
     match telemetry::init() {
         Ok(guard) => drop(guard),
         Err(telemetry::TelemetryInitError::AlreadyInitialized) => { /* fine */ }
+        Err(e) => panic!("unexpected init error: {e:?}"),
     }
 }
 
@@ -33,4 +34,21 @@ fn double_init_returns_error() {
         matches!(second, Err(telemetry::TelemetryInitError::AlreadyInitialized)),
         "expected AlreadyInitialized, got {second:?}"
     );
+}
+
+#[test]
+fn init_succeeds_with_unreachable_otlp_endpoint() {
+    // A closed port. Init must not block or fail — export failures
+    // are async and logged but don't affect the init path.
+    std::env::set_var("MENTISDB_OTLP_ENDPOINT", "http://127.0.0.1:1");
+    let guard = telemetry::init();
+    std::env::remove_var("MENTISDB_OTLP_ENDPOINT");
+    // Some runs (e.g. after the stdout-only test) will see
+    // AlreadyInitialized — accept both outcomes; the contract is
+    // "does not panic, does not block".
+    match guard {
+        Ok(g) => drop(g),
+        Err(telemetry::TelemetryInitError::AlreadyInitialized) => {}
+        Err(e) => panic!("unexpected init error: {e:?}"),
+    }
 }
