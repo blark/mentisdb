@@ -2,11 +2,16 @@
 //!
 //! Replaces `env_logger` with the `tracing` ecosystem. Always writes to
 //! stdout (pretty when stdout is a TTY, JSON otherwise). When
-//! `MENTISDB_OTLP_ENDPOINT` is set, additionally exports logs and traces
-//! over OTLP/HTTP to the configured collector.
+//! `MENTISDB_OTLP_ENDPOINT` is set, additionally exports logs, traces,
+//! and metrics over OTLP/HTTP to the configured collector.
 //!
 //! The upstream `log::…!` macros continue to work via the `tracing-log`
 //! bridge — no upstream call sites need to change.
+//!
+//! Metrics are picked up via `tracing_opentelemetry::MetricsLayer`, which
+//! intercepts tracing events whose field names begin with `counter.`,
+//! `histogram.`, or `monotonic_counter.` and routes them through the
+//! `SdkMeterProvider`.
 //!
 //! # Environment variables
 //!
@@ -50,6 +55,7 @@ pub enum TelemetryInitError {
 pub struct TelemetryGuard {
     tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
     logger_provider: Option<opentelemetry_sdk::logs::LoggerProvider>,
+    meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
 }
 
 impl std::fmt::Debug for TelemetryGuard {
@@ -57,6 +63,7 @@ impl std::fmt::Debug for TelemetryGuard {
         f.debug_struct("TelemetryGuard")
             .field("tracer_provider", &self.tracer_provider.is_some())
             .field("logger_provider", &self.logger_provider.is_some())
+            .field("meter_provider", &self.meter_provider.is_some())
             .finish()
     }
 }
@@ -73,6 +80,11 @@ impl Drop for TelemetryGuard {
                 eprintln!("telemetry: logger provider shutdown error: {e}");
             }
         }
+        if let Some(mp) = self.meter_provider.take() {
+            if let Err(e) = mp.shutdown() {
+                eprintln!("telemetry: meter provider shutdown error: {e}");
+            }
+        }
     }
 }
 
@@ -80,6 +92,7 @@ impl Drop for TelemetryGuard {
 struct OtlpProviders {
     tracer_provider: opentelemetry_sdk::trace::TracerProvider,
     logger_provider: opentelemetry_sdk::logs::LoggerProvider,
+    meter_provider: opentelemetry_sdk::metrics::SdkMeterProvider,
 }
 
 /// Build OTLP providers from the environment.
@@ -87,8 +100,9 @@ struct OtlpProviders {
 /// Returns `None` when `MENTISDB_OTLP_ENDPOINT` is unset or empty.
 fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, TelemetryInitError> {
     use opentelemetry::KeyValue;
-    use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig, WithHttpConfig};
+    use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
     use opentelemetry_sdk::logs::LoggerProvider;
+    use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
     use opentelemetry_sdk::trace::TracerProvider;
     use opentelemetry_sdk::{runtime, Resource};
 
@@ -135,18 +149,39 @@ fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, Telemet
         .with_http()
         .with_endpoint(endpoint)
         .with_timeout(Duration::from_secs(10))
-        .with_headers(headers)
+        .with_headers(headers.clone())
         .build()
         .map_err(|e| TelemetryInitError::OtlpBuild(e.to_string()))?;
 
     let logger_provider = LoggerProvider::builder()
         .with_batch_exporter(log_exporter, runtime::Tokio)
+        .with_resource(resource.clone())
+        .build();
+
+    // --- Metrics ---
+    let metric_exporter = MetricExporter::builder()
+        .with_http()
+        .with_endpoint(endpoint)
+        .with_timeout(Duration::from_secs(10))
+        .with_headers(headers)
+        .build()
+        .map_err(|e| TelemetryInitError::OtlpBuild(e.to_string()))?;
+
+    let reader = PeriodicReader::builder(metric_exporter, runtime::Tokio)
+        .with_interval(Duration::from_secs(60))
+        .build();
+
+    let meter_provider = SdkMeterProvider::builder()
+        .with_reader(reader)
         .with_resource(resource)
         .build();
+
+    opentelemetry::global::set_meter_provider(meter_provider.clone());
 
     Ok(Some(OtlpProviders {
         tracer_provider,
         logger_provider,
+        meter_provider,
     }))
 }
 
@@ -189,7 +224,7 @@ pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
         layers.push(tracing_subscriber::fmt::layer().json().with_ansi(false).boxed());
     }
 
-    let (tracer_provider, logger_provider) = match otlp {
+    let (tracer_provider, logger_provider, meter_provider) = match otlp {
         Some(providers) => {
             use opentelemetry::trace::TracerProvider as _;
             let tracer = providers.tracer_provider.tracer("mentisdbd");
@@ -199,9 +234,16 @@ pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
                     &providers.logger_provider,
                 ).boxed(),
             );
-            (Some(providers.tracer_provider), Some(providers.logger_provider))
+            layers.push(
+                tracing_opentelemetry::MetricsLayer::new(providers.meter_provider.clone()).boxed(),
+            );
+            (
+                Some(providers.tracer_provider),
+                Some(providers.logger_provider),
+                Some(providers.meter_provider),
+            )
         }
-        None => (None, None),
+        None => (None, None, None),
     };
 
     let subscriber = Registry::default()
@@ -218,11 +260,15 @@ pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
         if let Some(lp) = logger_provider {
             std::mem::forget(lp);
         }
+        if let Some(mp) = meter_provider {
+            std::mem::forget(mp);
+        }
         return Err(TelemetryInitError::AlreadyInitialized);
     }
 
     Ok(TelemetryGuard {
         tracer_provider,
         logger_provider,
+        meter_provider,
     })
 }
