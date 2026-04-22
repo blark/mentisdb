@@ -2196,6 +2196,16 @@ fn emit_agent_activity(agent_id: &str, operation: &str) {
     );
 }
 
+fn emit_thought_append(chain_key: &str, thought_type: ThoughtType, agent_id: &str) {
+    tracing::info!(
+        counter.mentisdb_thought_append = 1_u64,
+        chain_key = %chain_key,
+        thought_type = ?thought_type,
+        agent_id = %agent_id,
+        "thought appended"
+    );
+}
+
 impl MentisDbService {
     /// Create a new `MentisDbService` from a service configuration.
     ///
@@ -2341,6 +2351,7 @@ impl MentisDbService {
                 input
             };
             let thought = chain.append_thought(&agent_id, input)?.clone();
+            emit_thought_append(&chain_key, thought.thought_type, &agent_id);
             self.log_interaction(InteractionLogEntry {
                 access: "write",
                 operation: "bootstrap",
@@ -2462,6 +2473,7 @@ impl MentisDbService {
         }
 
         let thought = chain.append_thought(&agent_id, input)?.clone();
+        emit_thought_append(&chain_key, thought.thought_type, &agent_id);
         self.log_interaction(InteractionLogEntry {
             access: "write",
             operation: "append",
@@ -2527,6 +2539,7 @@ impl MentisDbService {
         }
 
         let thought = chain.append_thought(&agent_id, input)?.clone();
+        emit_thought_append(&chain_key, thought.thought_type, &agent_id);
         self.log_interaction(InteractionLogEntry {
             access: "write",
             operation: "append_retrospective",
