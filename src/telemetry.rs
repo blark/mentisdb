@@ -21,7 +21,7 @@ use std::io::IsTerminal;
 use std::time::Duration;
 
 use tracing_log::LogTracer;
-use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{layer::SubscriberExt, Layer, EnvFilter, Registry};
 
 // Environment variable names
 const ENV_OTLP_ENDPOINT: &str = "MENTISDB_OTLP_ENDPOINT";
@@ -93,14 +93,6 @@ fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, Telemet
     use opentelemetry_sdk::{runtime, Resource};
 
     if endpoint.is_empty() {
-        return Ok(None);
-    }
-
-    // Building an OTLP exporter (via reqwest) requires a running Tokio
-    // reactor. Return None gracefully when called outside one (e.g. in
-    // tests). Export failures from an unreachable endpoint are async and
-    // do not affect init.
-    if tokio::runtime::Handle::try_current().is_err() {
         return Ok(None);
     }
 
@@ -179,67 +171,55 @@ pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
     // Use set_global_default directly to avoid try_init() also calling
     // LogTracer::init() internally, which would conflict with the call above.
     //
-    // tracing-subscriber's layered types are not object-safe in a way that
-    // would let us erase the full subscriber type into Box<dyn Subscriber>.
-    // Instead we spell out the four concrete paths (tty/json × otlp/no-otlp).
-    // Each branch produces a different but fully monomorphic subscriber type.
-    let (tracer_provider, logger_provider) = if std::io::stdout().is_terminal() {
-        let fmt_layer = tracing_subscriber::fmt::layer().with_ansi(true);
-        match otlp {
-            Some(providers) => {
-                use opentelemetry::trace::TracerProvider as _;
-                let tracer = providers.tracer_provider.tracer("mentisdbd");
-                let trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-                let log_layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
-                    &providers.logger_provider,
-                );
-                let subscriber = Registry::default()
-                    .with(env_filter)
-                    .with(fmt_layer)
-                    .with(trace_layer)
-                    .with(log_layer);
-                tracing::subscriber::set_global_default(subscriber)
-                    .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
-                (Some(providers.tracer_provider), Some(providers.logger_provider))
-            }
-            None => {
-                let subscriber = Registry::default()
-                    .with(env_filter)
-                    .with(fmt_layer);
-                tracing::subscriber::set_global_default(subscriber)
-                    .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
-                (None, None)
-            }
-        }
+    // Vec<Box<dyn Layer<S>>> implements Layer<S>, so we collect all layers
+    // into a single Vec and add them via one .with() call. This collapses
+    // the 2×2 Cartesian product (tty/json × otlp/no-otlp) into a single
+    // construction. Task 6 can add metrics via layers.push(...) with no
+    // additional branching.
+
+    type DynLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
+
+    let mut layers: Vec<DynLayer> = Vec::new();
+
+    layers.push(env_filter.boxed());
+
+    if std::io::stdout().is_terminal() {
+        layers.push(tracing_subscriber::fmt::layer().with_ansi(true).boxed());
     } else {
-        let fmt_layer = tracing_subscriber::fmt::layer().json().with_ansi(false);
-        match otlp {
-            Some(providers) => {
-                use opentelemetry::trace::TracerProvider as _;
-                let tracer = providers.tracer_provider.tracer("mentisdbd");
-                let trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-                let log_layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
+        layers.push(tracing_subscriber::fmt::layer().json().with_ansi(false).boxed());
+    }
+
+    let (tracer_provider, logger_provider) = match otlp {
+        Some(providers) => {
+            use opentelemetry::trace::TracerProvider as _;
+            let tracer = providers.tracer_provider.tracer("mentisdbd");
+            layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+            layers.push(
+                opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                     &providers.logger_provider,
-                );
-                let subscriber = Registry::default()
-                    .with(env_filter)
-                    .with(fmt_layer)
-                    .with(trace_layer)
-                    .with(log_layer);
-                tracing::subscriber::set_global_default(subscriber)
-                    .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
-                (Some(providers.tracer_provider), Some(providers.logger_provider))
-            }
-            None => {
-                let subscriber = Registry::default()
-                    .with(env_filter)
-                    .with(fmt_layer);
-                tracing::subscriber::set_global_default(subscriber)
-                    .map_err(|_| TelemetryInitError::AlreadyInitialized)?;
-                (None, None)
-            }
+                ).boxed(),
+            );
+            (Some(providers.tracer_provider), Some(providers.logger_provider))
         }
+        None => (None, None),
     };
+
+    let subscriber = Registry::default()
+        .with(layers);
+    if let Err(_) = tracing::subscriber::set_global_default(subscriber) {
+        // Subscriber already set. Leak any OTLP providers rather than
+        // dropping them: their Drop impl calls a blocking shutdown which
+        // tries to flush in-flight batches to the (possibly unreachable)
+        // endpoint. We're not the owner of the running subscriber, so
+        // there's nothing useful to flush here.
+        if let Some(tp) = tracer_provider {
+            std::mem::forget(tp);
+        }
+        if let Some(lp) = logger_provider {
+            std::mem::forget(lp);
+        }
+        return Err(TelemetryInitError::AlreadyInitialized);
+    }
 
     Ok(TelemetryGuard {
         tracer_provider,

@@ -36,8 +36,8 @@ fn double_init_returns_error() {
     );
 }
 
-#[test]
-fn init_succeeds_with_unreachable_otlp_endpoint() {
+#[tokio::test]
+async fn init_succeeds_with_unreachable_otlp_endpoint() {
     // A closed port. Init must not block or fail — export failures
     // are async and logged but don't affect the init path.
     std::env::set_var("MENTISDB_OTLP_ENDPOINT", "http://127.0.0.1:1");
@@ -46,6 +46,7 @@ fn init_succeeds_with_unreachable_otlp_endpoint() {
     // Some runs (e.g. after the stdout-only test) will see
     // AlreadyInitialized — accept both outcomes; the contract is
     // "does not panic, does not block".
+    //
     match guard {
         Ok(g) => drop(g),
         Err(telemetry::TelemetryInitError::AlreadyInitialized) => {}
