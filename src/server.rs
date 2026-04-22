@@ -3799,6 +3799,12 @@ impl MentisDbService {
     }
 
     async fn skill_markdown(&self) -> Result<SkillMarkdownResponse, Box<dyn Error + Send + Sync>> {
+        // Emit at entry; skill_name is fixed ("core") — this is the embedded operating instructions doc.
+        tracing::info!(
+            counter.mentisdb_skill_invocation = 1_u64,
+            skill_name = "core",
+            "skill invoked"
+        );
         self.log_interaction(InteractionLogEntry {
             access: "read",
             operation: "skill_markdown",
@@ -3973,6 +3979,12 @@ impl MentisDbService {
             .chain_key
             .clone()
             .unwrap_or_else(|| "<skills>".to_string());
+        // Emit at entry so attempted invocations (including failed lookups) are counted.
+        tracing::info!(
+            counter.mentisdb_skill_invocation = 1_u64,
+            skill_name = %request.skill_id,
+            "skill invoked"
+        );
         let format = parse_skill_format(request.format.as_deref())?;
         let (skill, entry) = {
             self.ensure_skill_registry_fresh().await?;
