@@ -19,9 +19,6 @@ pub enum TelemetryInitError {
     /// The global tracing subscriber has already been set.
     #[error("global tracing subscriber already set")]
     AlreadyInitialized,
-    /// Installation of the `log` → `tracing` bridge failed.
-    #[error("log bridge installation failed: {0}")]
-    LogBridge(#[from] tracing_log::log_tracer::SetLoggerError),
 }
 
 /// RAII guard for graceful telemetry shutdown.
