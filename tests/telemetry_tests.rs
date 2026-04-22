@@ -13,7 +13,6 @@ fn init_succeeds_without_otlp_env() {
     match telemetry::init() {
         Ok(guard) => drop(guard),
         Err(telemetry::TelemetryInitError::AlreadyInitialized) => { /* fine */ }
-        Err(e) => panic!("unexpected telemetry init error: {e}"),
     }
 }
 
