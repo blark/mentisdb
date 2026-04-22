@@ -4176,6 +4176,13 @@ impl MentisDbService {
             result_count: Some(chain.thoughts().len()),
             note: None,
         });
+        let integrity_ok = chain.verify_integrity();
+        tracing::info!(
+            counter.mentisdb_chain_integrity_check = 1_u64,
+            chain_key = %chain_key,
+            status = if integrity_ok { "ok" } else { "fail" },
+            "chain integrity check"
+        );
         Ok(HeadResponse {
             chain_key,
             thought_count: chain.thoughts().len(),
@@ -4184,7 +4191,7 @@ impl MentisDbService {
                 .thoughts()
                 .last()
                 .map(|thought| thought_to_json(&chain, thought)),
-            integrity_ok: chain.verify_integrity(),
+            integrity_ok,
             storage_location: chain.storage_location(),
         })
     }

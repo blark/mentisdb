@@ -3777,7 +3777,15 @@ impl MentisDb {
             }
         }
 
-        if !chain.verify_integrity() {
+        let integrity_ok = chain.verify_integrity();
+        #[cfg(feature = "server")]
+        tracing::info!(
+            counter.mentisdb_chain_integrity_check = 1_u64,
+            chain_key = %chain.persistence.as_ref().map(|m| m.chain_key.as_str()).unwrap_or("<unknown>"),
+            status = if integrity_ok { "ok" } else { "fail" },
+            "chain integrity check"
+        );
+        if !integrity_ok {
             if chain.verify_integrity_legacy() {
                 // Chain was written with the old JSON-based hash algorithm.
                 // Transparently rehash to bincode and rewrite the file.
