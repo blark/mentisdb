@@ -890,7 +890,6 @@ impl ServerHandle {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
 pub struct MentisDbServerHandles {
     /// Handle for the plain-HTTP MCP server. Always present.
     pub mcp: ServerHandle,
@@ -908,6 +907,10 @@ pub struct MentisDbServerHandles {
     /// [`MentisDbServerConfig::dashboard_addr`] was `None` (i.e.
     /// `MENTISDB_DASHBOARD_PORT=0`).
     pub dashboard: Option<ServerHandle>,
+    /// The shared service instance used by all HTTP surfaces. Exposed so that
+    /// callers (e.g. `mentisdbd::main`) can register observable gauges against
+    /// the live chain map without requiring a second service construction.
+    pub service: Arc<MentisDbService>,
 }
 
 /// Resolve the default on-disk MentisDB storage directory using the following
@@ -1440,6 +1443,7 @@ pub async fn start_servers(
         https_mcp,
         https_rest,
         dashboard,
+        service,
     })
 }
 
@@ -3255,6 +3259,24 @@ impl MentisDbService {
             "search completed"
         );
         Ok(response)
+    }
+
+    /// Return `(chain_key, thought_count)` pairs for all currently-loaded chains.
+    ///
+    /// Uses `try_read()` so the method is non-blocking: chains that are
+    /// currently write-locked are silently skipped. Suitable for the
+    /// telemetry observable gauge callback, which runs on the OTel SDK's
+    /// background thread and must not block or deadlock.
+    pub fn chain_sizes(&self) -> Vec<(String, u64)> {
+        self.chains
+            .iter()
+            .filter_map(|entry| {
+                let key = entry.key().clone();
+                // try_read() is non-blocking; skip the chain if a write is in progress.
+                let count = entry.value().try_read().ok().map(|guard| guard.thoughts().len() as u64)?;
+                Some((key, count))
+            })
+            .collect()
     }
 
     async fn list_chains_json(&self) -> Result<Value, Box<dyn Error + Send + Sync>> {

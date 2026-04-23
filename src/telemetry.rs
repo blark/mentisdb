@@ -272,3 +272,32 @@ pub fn init() -> Result<TelemetryGuard, TelemetryInitError> {
         meter_provider,
     })
 }
+
+/// Register an OpenTelemetry observable gauge that reports the current size of
+/// each chain. The provided closure is called by the OTel SDK on each metrics
+/// collection cycle (default 60 s) and must be cheap to invoke.
+///
+/// Uses the global meter provider set during [`init`]. When OTLP is disabled
+/// (`MENTISDB_OTLP_ENDPOINT` unset) the global provider is a no-op
+/// implementation and this function registers a no-op gauge harmlessly.
+///
+/// The `_gauge` handle returned by `.build()` is intentionally dropped here;
+/// the callback is retained by the meter provider internally and fires on every
+/// collection cycle until the meter provider is shut down.
+pub fn register_chain_size_gauge<F>(provider: F)
+where
+    F: Fn() -> Vec<(String, u64)> + Send + Sync + 'static,
+{
+    use opentelemetry::KeyValue;
+
+    let meter = opentelemetry::global::meter("mentisdbd");
+    let _gauge = meter
+        .u64_observable_gauge("mentisdb.thought.chain_size")
+        .with_description("Number of thoughts in each chain")
+        .with_callback(move |observer| {
+            for (key, size) in provider() {
+                observer.observe(size, &[KeyValue::new("chain_key", key)]);
+            }
+        })
+        .build();
+}

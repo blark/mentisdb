@@ -513,6 +513,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let handles = start_servers(config).await?;
 
+    // Register an observable gauge that reports the current thought count per
+    // chain on each OTel metrics collection cycle (default 60 s). The closure
+    // captures an Arc clone of the shared service so the chain map stays alive
+    // for the gauge callback's lifetime. No-op when OTLP is disabled.
+    {
+        let service_for_gauge = handles.service.clone();
+        telemetry::register_chain_size_gauge(move || service_for_gauge.chain_sizes());
+    }
+
     log::info!("MCP  listening on http://{}", handles.mcp.local_addr());
     log::info!("REST listening on http://{}", handles.rest.local_addr());
     if let Some(h) = &handles.https_mcp {
