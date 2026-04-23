@@ -1744,7 +1744,7 @@ async fn rest_router_searches_by_timestamp_window() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/thoughts?verbose=true")
+                .uri("/v1/thoughts")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
@@ -1766,7 +1766,7 @@ async fn rest_router_searches_by_timestamp_window() {
             .unwrap(),
     )
     .unwrap();
-    let first_timestamp = first_json["thought"]["timestamp"]
+    let first_timestamp = first_json["timestamp"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1778,7 +1778,7 @@ async fn rest_router_searches_by_timestamp_window() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/thoughts?verbose=true")
+                .uri("/v1/thoughts")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
@@ -1800,7 +1800,7 @@ async fn rest_router_searches_by_timestamp_window() {
             .unwrap(),
     )
     .unwrap();
-    let second_timestamp = second_json["thought"]["timestamp"]
+    let second_timestamp = second_json["timestamp"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1836,7 +1836,7 @@ async fn rest_router_searches_by_timestamp_window() {
     assert_eq!(thoughts[0]["content"], "Second timed thought.");
     assert_eq!(
         thoughts[0]["timestamp"],
-        second_json["thought"]["timestamp"]
+        second_json["timestamp"]
     );
 
     let _ = std::fs::remove_dir_all(&dir);
