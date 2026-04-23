@@ -17,10 +17,16 @@
 //!
 //! | Variable | Default | Purpose |
 //! |---|---|---|
-//! | `MENTISDB_OTLP_ENDPOINT` | (unset) | OTLP/HTTP collector URL; OTLP disabled when unset |
-//! | `MENTISDB_OTLP_AUTH` | (unset) | Value of the `Authorization` header |
-//! | `MENTISDB_OTLP_STREAM` | `"mentisdb"` | Value of the `stream-name` header (OpenObserve) |
+//! | `MENTISDB_OTLP_ENDPOINT` | (unset) | OTLP/HTTP collector base URL; OTLP disabled when unset. Per-signal paths `/v1/traces`, `/v1/logs`, `/v1/metrics` are appended automatically (the OpenTelemetry OTLP HTTP SDK treats `.with_endpoint()` as a full URL, not a base, so we do the appending). For OpenObserve, pass the full `/api/<org>` prefix, e.g. `https://o2.sherwood.haus/api/default`. |
+//! | `MENTISDB_OTLP_AUTH` | (unset) | Value of the `Authorization` header (e.g. `Basic <base64>` for OpenObserve native auth) |
 //! | `MENTISDB_DEPLOY_ENV` | `"homelab"` | `deployment.environment` resource attribute |
+//!
+//! Signals are partitioned on the collector side by signal type and (for
+//! metrics) by metric name; in OpenObserve that means logs/traces land in the
+//! `default` stream of their respective type, and each metric gets its own
+//! stream named after the metric. Filter by the resource attributes
+//! `service.name=mentisdbd` and `deployment.environment=<env>` to scope queries
+//! to this daemon.
 
 use std::io::IsTerminal;
 use std::time::Duration;
@@ -31,9 +37,7 @@ use tracing_subscriber::{layer::SubscriberExt, Layer, EnvFilter, Registry};
 // Environment variable names
 const ENV_OTLP_ENDPOINT: &str = "MENTISDB_OTLP_ENDPOINT";
 const ENV_OTLP_AUTH: &str = "MENTISDB_OTLP_AUTH";
-const ENV_OTLP_STREAM: &str = "MENTISDB_OTLP_STREAM";
 const ENV_DEPLOY_ENV: &str = "MENTISDB_DEPLOY_ENV";
-const DEFAULT_STREAM: &str = "mentisdb";
 const DEFAULT_DEPLOY_ENV: &str = "homelab";
 
 /// Errors that can occur during telemetry initialization.
@@ -126,14 +130,19 @@ fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, Telemet
             headers.insert("Authorization".to_string(), auth);
         }
     }
-    let stream = std::env::var(ENV_OTLP_STREAM)
-        .unwrap_or_else(|_| DEFAULT_STREAM.to_string());
-    headers.insert("stream-name".to_string(), stream);
+
+    // The opentelemetry-otlp HTTP exporter treats `.with_endpoint(url)` as the
+    // full per-signal URL, NOT a base to which it appends `/v1/<signal>`. Build
+    // each signal's URL explicitly from the configured base.
+    let base = endpoint.trim_end_matches('/');
+    let traces_endpoint = format!("{base}/v1/traces");
+    let logs_endpoint = format!("{base}/v1/logs");
+    let metrics_endpoint = format!("{base}/v1/metrics");
 
     // --- Traces ---
     let span_exporter = SpanExporter::builder()
         .with_http()
-        .with_endpoint(endpoint)
+        .with_endpoint(&traces_endpoint)
         .with_timeout(Duration::from_secs(10))
         .with_headers(headers.clone())
         .build()
@@ -147,7 +156,7 @@ fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, Telemet
     // --- Logs ---
     let log_exporter = LogExporter::builder()
         .with_http()
-        .with_endpoint(endpoint)
+        .with_endpoint(&logs_endpoint)
         .with_timeout(Duration::from_secs(10))
         .with_headers(headers.clone())
         .build()
@@ -161,7 +170,7 @@ fn build_otlp_providers(endpoint: &str) -> Result<Option<OtlpProviders>, Telemet
     // --- Metrics ---
     let metric_exporter = MetricExporter::builder()
         .with_http()
-        .with_endpoint(endpoint)
+        .with_endpoint(&metrics_endpoint)
         .with_timeout(Duration::from_secs(10))
         .with_headers(headers)
         .build()
