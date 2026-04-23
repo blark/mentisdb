@@ -6362,7 +6362,7 @@ fn mcp_tool_metadata() -> Vec<ToolMetadata> {
         .with_parameter(ToolParameter::new("refs", ToolParameterType::Array).with_description("Optional referenced thought indices, such as the mistake, correction, or earlier checkpoint that motivated the lesson.").with_items(ToolParameterType::Integer))
         .with_parameter(ToolParameter::new("signing_key_id", ToolParameterType::String).with_description("Optional key id used to verify the detached thought signature."))
         .with_parameter(ToolParameter::new("thought_signature", ToolParameterType::Array).with_description("Optional detached signature bytes for the signable thought payload.").with_items(ToolParameterType::Integer))
-        .with_parameter(ToolParameter::new("verbose", ToolParameterType::Boolean).with_description("When true, return the full Thought echo (legacy shape). Default false returns a terse ack. See mentisdb_append for details.")),
+        .with_parameter(ToolParameter::new("verbose", ToolParameterType::Boolean).with_description("When true, return the full Thought echo (legacy shape: {thought: {...}, head_hash}). Default false returns a terse ack of server-assigned fields only (index, id, hash, prev_hash, head_hash, timestamp, schema_version, agent_id, and any resolved agent_name/agent_owner/entity_type/relations). Set to true if you need the full Thought for signature verification or client-side caching.")),
         ToolMetadata::new(
             "mentisdb_search",
             "Search durable memories by text, type, role, tags, concepts, and importance.",
