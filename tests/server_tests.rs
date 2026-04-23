@@ -3709,10 +3709,15 @@ fn append_thought_ack_covers_every_server_assigned_field() {
 // MCP terse-append-response tests (T4)
 // ---------------------------------------------------------------------------
 
-/// Spin up an ephemeral `start_servers` pair and return `(mcp_url, rest_url, handles)`.
-/// The caller holds `handles` for the lifetime of the test; dropping it shuts the
-/// servers down (the underlying tokio tasks are aborted when the `JoinHandle`s are
-/// dropped by `MentisDbServerHandles`).
+/// Spawn an ephemeral mentisdbd instance bound to loopback on OS-assigned ports
+/// and return `(mcp_url, rest_url, handles)`.
+///
+/// `MentisDbServerHandles` holds oneshot `ServerHandle`s (shutdown senders),
+/// NOT `JoinHandle`s, and it has no `Drop` impl — dropping `handles` does not
+/// signal shutdown. Inside `#[tokio::test]` cleanup happens when the runtime
+/// tears down at end-of-function, which is good enough for single-use tests.
+/// For deterministic shutdown (e.g. a test that restarts the server mid-flight)
+/// call `.shutdown()` on each handle explicitly before returning.
 async fn spawn_test_mcp_server(chain_key: &str) -> (String, String, mentisdb::server::MentisDbServerHandles) {
     use std::net::SocketAddr;
     use mentisdb::server::start_servers;
@@ -3781,6 +3786,13 @@ async fn mcp_append_returns_terse_ack_by_default() {
     assert!(payload["hash"].is_string(), "hash at top level");
     assert!(payload.get("content").is_none(), "terse response must not echo content");
     assert!(payload["head_hash"].is_string(), "head_hash present");
+    let id_str = payload["id"].as_str().expect("id at top level");
+    assert_ne!(
+        id_str,
+        "00000000-0000-0000-0000-000000000000",
+        "id must not be nil (from_full fallback leaked)"
+    );
+    assert!(payload["timestamp"].is_string(), "timestamp at top level");
 }
 
 #[tokio::test]
