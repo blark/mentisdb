@@ -3544,3 +3544,47 @@ async fn start_servers_shares_state_across_mcp_and_rest() {
     drop(handles);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn append_thought_ack_projection_reads_server_assigned_fields() {
+    use mentisdb::MentisDb;
+    use mentisdb::ThoughtInput;
+    use mentisdb::ThoughtType;
+    use tempfile::TempDir;
+
+    // This test verifies that AppendThoughtAck::from_full(&response) extracts
+    // exactly the fields listed in the spec's field-derivation table, so future
+    // schema changes fail here loud and early.
+    let tmp = TempDir::new().expect("tempdir");
+    let mut chain = MentisDb::open(
+        &tmp.path().to_path_buf(),
+        "test-agent",
+        "Test Agent",
+        None,
+        None,
+    )
+    .expect("chain open");
+    let input = ThoughtInput::new(ThoughtType::Decision, "ack projection probe".to_string());
+    let thought = chain
+        .append_thought("test-agent", input)
+        .expect("append")
+        .clone();
+
+    let thought_json = chain.thought_json(&thought);
+    let head_hash = chain.head_hash().map(ToOwned::to_owned);
+
+    let full = mentisdb::server::AppendThoughtResponse {
+        thought: thought_json.clone(),
+        head_hash: head_hash.clone(),
+    };
+    let ack = mentisdb::server::AppendThoughtAck::from_full(&full);
+
+    assert_eq!(ack.index, thought.index, "index");
+    assert_eq!(ack.id, thought.id, "id");
+    assert_eq!(ack.hash, thought.hash, "hash");
+    assert_eq!(ack.prev_hash.as_deref(), Some(thought.prev_hash.as_str()), "prev_hash");
+    assert_eq!(ack.head_hash, head_hash, "head_hash");
+    assert_eq!(ack.schema_version, thought.schema_version, "schema_version");
+    assert_eq!(ack.agent_id, thought.agent_id, "agent_id");
+    assert!(ack.agent_name.is_some(), "agent_name should be populated by thought_json");
+}

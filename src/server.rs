@@ -4700,9 +4700,96 @@ struct AppendRetrospectiveRequest {
 }
 
 #[derive(Debug, Serialize)]
-struct AppendThoughtResponse {
-    thought: Value,
-    head_hash: Option<String>,
+pub struct AppendThoughtResponse {
+    pub thought: Value,
+    pub head_hash: Option<String>,
+}
+
+/// Terse append acknowledgement. Emitted by default by `mentisdb_append` /
+/// `mentisdb_append_retrospective` (MCP) and `POST /v1/thoughts` /
+/// `POST /v1/retrospectives` (REST). Contains only server-assigned or
+/// server-resolved fields — every other field on `Thought` is client-supplied
+/// and known to the caller, so echoing it back wastes LLM context.
+///
+/// Clients needing the full thought echo can opt in via `verbose: true`
+/// (MCP argument) or `?verbose=true` (REST query) to receive the legacy
+/// [`AppendThoughtResponse`] instead.
+#[derive(Debug, Serialize)]
+pub struct AppendThoughtAck {
+    pub index: u64,
+    pub id: Uuid,
+    pub hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_hash: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub schema_version: u32,
+    pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_type: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub relations: Vec<Value>,
+}
+
+impl AppendThoughtAck {
+    pub fn from_full(response: &AppendThoughtResponse) -> Self {
+        let t = &response.thought;
+        Self {
+            index: t.get("index").and_then(Value::as_u64).unwrap_or_default(),
+            id: t
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<Uuid>().ok())
+                .unwrap_or_default(),
+            hash: t
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            prev_hash: t
+                .get("prev_hash")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            head_hash: response.head_hash.clone(),
+            timestamp: t
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(Utc::now),
+            schema_version: t
+                .get("schema_version")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as u32,
+            agent_id: t
+                .get("agent_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            agent_name: t
+                .get("agent_name")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            agent_owner: t
+                .get("agent_owner")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            entity_type: t
+                .get("entity_type")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            relations: t
+                .get("relations")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
