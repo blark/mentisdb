@@ -5703,29 +5703,34 @@ async fn rest_bootstrap_handler(
 
 async fn rest_append_handler(
     State(service): State<Arc<MentisDbService>>,
+    // Query MUST precede Json: Json consumes the request body, so any body-
+    // independent extractor has to run first.
     Query(q): Query<VerboseQuery>,
     Json(request): Json<AppendThoughtRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let response = service_call(service.append(request).await)?;
     let response = response.0;
     Ok(Json(if q.verbose {
-        serde_json::to_value(&response).unwrap_or(Value::Null)
+        serde_json::to_value(&response).unwrap_or_else(|_| Value::Null)
     } else {
-        serde_json::to_value(AppendThoughtAck::from_full(&response)).unwrap_or(Value::Null)
+        serde_json::to_value(AppendThoughtAck::from_full(&response))
+            .unwrap_or_else(|_| Value::Null)
     }))
 }
 
 async fn rest_append_retrospective_handler(
     State(service): State<Arc<MentisDbService>>,
+    // Query MUST precede Json — see rest_append_handler for the reasoning.
     Query(q): Query<VerboseQuery>,
     Json(request): Json<AppendRetrospectiveRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let response = service_call(service.append_retrospective(request).await)?;
     let response = response.0;
     Ok(Json(if q.verbose {
-        serde_json::to_value(&response).unwrap_or(Value::Null)
+        serde_json::to_value(&response).unwrap_or_else(|_| Value::Null)
     } else {
-        serde_json::to_value(AppendThoughtAck::from_full(&response)).unwrap_or(Value::Null)
+        serde_json::to_value(AppendThoughtAck::from_full(&response))
+            .unwrap_or_else(|_| Value::Null)
     }))
 }
 
