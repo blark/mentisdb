@@ -3564,27 +3564,57 @@ fn append_thought_ack_projection_reads_server_assigned_fields() {
         None,
     )
     .expect("chain open");
-    let input = ThoughtInput::new(ThoughtType::Decision, "ack projection probe".to_string());
-    let thought = chain
-        .append_thought("test-agent", input)
-        .expect("append")
+    // First append — genesis thought. On the stored `Thought` this has an
+    // empty `prev_hash` string; the ack filters empty values to None so the
+    // serialized payload shrinks.
+    let genesis_input =
+        ThoughtInput::new(ThoughtType::Decision, "ack projection probe genesis".to_string());
+    let genesis = chain
+        .append_thought("test-agent", genesis_input)
+        .expect("append genesis")
         .clone();
-
-    let thought_json = chain.thought_json(&thought);
-    let head_hash = chain.head_hash().map(ToOwned::to_owned);
-
-    let full = mentisdb::server::AppendThoughtResponse {
-        thought: thought_json.clone(),
-        head_hash: head_hash.clone(),
+    let genesis_head = chain.head_hash().map(ToOwned::to_owned);
+    let genesis_full = mentisdb::server::AppendThoughtResponse {
+        thought: chain.thought_json(&genesis),
+        head_hash: genesis_head.clone(),
     };
-    let ack = mentisdb::server::AppendThoughtAck::from_full(&full);
+    let genesis_ack = mentisdb::server::AppendThoughtAck::from_full(&genesis_full);
 
-    assert_eq!(ack.index, thought.index, "index");
-    assert_eq!(ack.id, thought.id, "id");
-    assert_eq!(ack.hash, thought.hash, "hash");
-    assert_eq!(ack.prev_hash.as_deref(), Some(thought.prev_hash.as_str()), "prev_hash");
-    assert_eq!(ack.head_hash, head_hash, "head_hash");
-    assert_eq!(ack.schema_version, thought.schema_version, "schema_version");
-    assert_eq!(ack.agent_id, thought.agent_id, "agent_id");
-    assert!(ack.agent_name.is_some(), "agent_name should be populated by thought_json");
+    assert_eq!(genesis_ack.index, genesis.index, "genesis index");
+    assert_eq!(genesis_ack.id, genesis.id, "genesis id");
+    assert_eq!(genesis_ack.hash, genesis.hash, "genesis hash");
+    assert!(
+        genesis_ack.prev_hash.is_none(),
+        "genesis thought prev_hash should project to None, got {:?}",
+        genesis_ack.prev_hash
+    );
+    assert_eq!(genesis_ack.head_hash, genesis_head, "genesis head_hash");
+    assert_eq!(genesis_ack.schema_version, genesis.schema_version, "schema_version");
+    assert_eq!(genesis_ack.agent_id, genesis.agent_id, "agent_id");
+    assert!(
+        genesis_ack.agent_name.is_some(),
+        "agent_name should be populated by thought_json"
+    );
+
+    // Second append — non-genesis. `prev_hash` now carries a real hash that
+    // survives the empty-string filter.
+    let next_input =
+        ThoughtInput::new(ThoughtType::Decision, "ack projection probe next".to_string());
+    let next = chain
+        .append_thought("test-agent", next_input)
+        .expect("append next")
+        .clone();
+    let next_full = mentisdb::server::AppendThoughtResponse {
+        thought: chain.thought_json(&next),
+        head_hash: chain.head_hash().map(ToOwned::to_owned),
+    };
+    let next_ack = mentisdb::server::AppendThoughtAck::from_full(&next_full);
+
+    assert_eq!(
+        next_ack.prev_hash.as_deref(),
+        Some(next.prev_hash.as_str()),
+        "non-genesis prev_hash must round-trip"
+    );
+    assert_eq!(next_ack.index, next.index, "non-genesis index");
+    assert_eq!(next_ack.hash, next.hash, "non-genesis hash");
 }

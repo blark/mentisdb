@@ -4699,9 +4699,15 @@ struct AppendRetrospectiveRequest {
     refs: Option<Vec<u64>>,
 }
 
+/// Verbose append response. Emitted when a caller opts in via `verbose: true`
+/// (MCP) or `?verbose=true` (REST); the default response shape is the terse
+/// [`AppendThoughtAck`]. Carries the full canonicalized thought as JSON plus
+/// the chain head hash after the append.
 #[derive(Debug, Serialize)]
 pub struct AppendThoughtResponse {
+    /// Full canonical thought JSON as emitted by [`crate::MentisDb::thought_json`].
     pub thought: Value,
+    /// SHA-256 head hash of the chain after this thought was appended.
     pub head_hash: Option<String>,
 }
 
@@ -4716,27 +4722,44 @@ pub struct AppendThoughtResponse {
 /// [`AppendThoughtResponse`] instead.
 #[derive(Debug, Serialize)]
 pub struct AppendThoughtAck {
+    /// Zero-based position of the thought within the chain.
     pub index: u64,
+    /// Stable UUID of the appended thought.
     pub id: Uuid,
+    /// SHA-256 hash of the thought's canonical contents.
     pub hash: String,
+    /// Hash of the previous thought in the chain; absent for the genesis thought.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev_hash: Option<String>,
+    /// SHA-256 head hash of the chain after this thought was appended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head_hash: Option<String>,
+    /// Server-assigned commit timestamp.
     pub timestamp: DateTime<Utc>,
+    /// Schema version the thought was written under.
     pub schema_version: u32,
+    /// Resolved producing-agent id (may reflect a server fallback when the client sent none).
     pub agent_id: String,
+    /// Resolved producing-agent display name, when the registry has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
+    /// Resolved producing-agent owner or tenant label, when registered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_owner: Option<String>,
+    /// Entity-type label attached to the thought (client-supplied or server-attributed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_type: Option<String>,
+    /// Typed graph relations on the thought as resolved by the server.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub relations: Vec<Value>,
 }
 
 impl AppendThoughtAck {
+    /// Project a verbose [`AppendThoughtResponse`] down to the terse ack shape.
+    ///
+    /// Reads server-assigned and server-resolved fields off the JSON thought
+    /// produced by [`crate::MentisDb::thought_json`]; client-supplied fields
+    /// (content, tags, concepts, etc.) are intentionally omitted.
     pub fn from_full(response: &AppendThoughtResponse) -> Self {
         let t = &response.thought;
         Self {
@@ -4754,6 +4777,7 @@ impl AppendThoughtAck {
             prev_hash: t
                 .get("prev_hash")
                 .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
                 .map(str::to_string),
             head_hash: response.head_hash.clone(),
             timestamp: t
