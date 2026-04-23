@@ -59,7 +59,7 @@ async fn append_thought_via_rest(
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/thoughts")
+                .uri("/v1/thoughts?verbose=true")
                 .header("content-type", "application/json")
                 .body(Body::from(payload.to_string()))
                 .unwrap(),
@@ -1744,7 +1744,7 @@ async fn rest_router_searches_by_timestamp_window() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/thoughts")
+                .uri("/v1/thoughts?verbose=true")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
@@ -1778,7 +1778,7 @@ async fn rest_router_searches_by_timestamp_window() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/thoughts")
+                .uri("/v1/thoughts?verbose=true")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
@@ -1856,7 +1856,7 @@ async fn rest_router_appends_retrospective_with_defaults() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/retrospectives")
+                .uri("/v1/retrospectives?verbose=true")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
@@ -3504,7 +3504,7 @@ async fn start_servers_shares_state_across_mcp_and_rest() {
     })
     .await
     .unwrap();
-    let appended_index = appended["thought"]["index"]
+    let appended_index = appended["index"]
         .as_u64()
         .expect("index in REST append response");
     let appended_head = appended["head_hash"]
