@@ -4653,6 +4653,17 @@ struct BootstrapResponse {
     available_skills: Vec<SkillSummary>,
 }
 
+/// Query string toggle for append endpoints. Default is terse (false); set
+/// `?verbose=true` to restore the legacy full-[`AppendThoughtResponse`] echo.
+#[derive(Debug, Deserialize, Default)]
+struct VerboseQuery {
+    /// When `true`, the handler returns the full [`AppendThoughtResponse`]
+    /// (legacy shape). When absent or `false` (the default), the handler
+    /// returns the terse [`AppendThoughtAck`] instead.
+    #[serde(default)]
+    verbose: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct AppendThoughtRequest {
     chain_key: Option<String>,
@@ -5692,16 +5703,30 @@ async fn rest_bootstrap_handler(
 
 async fn rest_append_handler(
     State(service): State<Arc<MentisDbService>>,
+    Query(q): Query<VerboseQuery>,
     Json(request): Json<AppendThoughtRequest>,
-) -> Result<Json<AppendThoughtResponse>, (StatusCode, Json<Value>)> {
-    service_call(service.append(request).await)
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let response = service_call(service.append(request).await)?;
+    let response = response.0;
+    Ok(Json(if q.verbose {
+        serde_json::to_value(&response).unwrap_or(Value::Null)
+    } else {
+        serde_json::to_value(AppendThoughtAck::from_full(&response)).unwrap_or(Value::Null)
+    }))
 }
 
 async fn rest_append_retrospective_handler(
     State(service): State<Arc<MentisDbService>>,
+    Query(q): Query<VerboseQuery>,
     Json(request): Json<AppendRetrospectiveRequest>,
-) -> Result<Json<AppendThoughtResponse>, (StatusCode, Json<Value>)> {
-    service_call(service.append_retrospective(request).await)
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let response = service_call(service.append_retrospective(request).await)?;
+    let response = response.0;
+    Ok(Json(if q.verbose {
+        serde_json::to_value(&response).unwrap_or(Value::Null)
+    } else {
+        serde_json::to_value(AppendThoughtAck::from_full(&response)).unwrap_or(Value::Null)
+    }))
 }
 
 async fn rest_search_handler(

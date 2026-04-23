@@ -3838,3 +3838,58 @@ async fn mcp_append_verbose_true_restores_full_echo() {
     );
     assert!(payload["head_hash"].is_string(), "head_hash still present");
 }
+
+#[tokio::test]
+async fn rest_append_returns_terse_ack_by_default() {
+    let (_mcp_url, rest_url, _handles) = spawn_test_mcp_server("rest-terse-probe").await;
+    let body = serde_json::json!({
+        "chain_key": "rest-terse-probe",
+        "agent_id": "probe",
+        "thought_type": "Decision",
+        "content": "rest terse probe"
+    });
+    let url = format!("{rest_url}/v1/thoughts");
+    let payload: serde_json::Value = tokio::task::spawn_blocking(move || {
+        ureq::post(&url)
+            .set("content-type", "application/json")
+            .send_string(&body.to_string())
+            .expect("rest append")
+            .into_json::<serde_json::Value>()
+            .expect("rest body")
+    })
+    .await
+    .unwrap();
+
+    assert!(payload.get("thought").is_none(), "REST default should be terse");
+    assert!(payload["index"].is_u64(), "index at top level");
+    assert!(payload.get("content").is_none(), "terse should not echo content");
+    assert!(payload["head_hash"].is_string(), "head_hash present");
+}
+
+#[tokio::test]
+async fn rest_append_verbose_query_restores_full_echo() {
+    let (_mcp_url, rest_url, _handles) = spawn_test_mcp_server("rest-verbose-probe").await;
+    let body = serde_json::json!({
+        "chain_key": "rest-verbose-probe",
+        "agent_id": "probe",
+        "thought_type": "Decision",
+        "content": "rest verbose probe"
+    });
+    let url = format!("{rest_url}/v1/thoughts?verbose=true");
+    let payload: serde_json::Value = tokio::task::spawn_blocking(move || {
+        ureq::post(&url)
+            .set("content-type", "application/json")
+            .send_string(&body.to_string())
+            .expect("rest append")
+            .into_json::<serde_json::Value>()
+            .expect("rest body")
+    })
+    .await
+    .unwrap();
+
+    assert!(payload["thought"].is_object(), "verbose query should restore full echo");
+    assert_eq!(
+        payload["thought"]["content"].as_str(),
+        Some("rest verbose probe")
+    );
+}
