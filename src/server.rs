@@ -1989,10 +1989,10 @@ impl ToolProtocol for MentisDbMcpProtocol {
                 parse_and_call(parameters, |request| self.service.bootstrap(request)).await
             }
             "mentisdb_append" => {
-                parse_and_call(parameters, |request| self.service.append(request)).await
+                append_tool_call(parameters, |request| self.service.append(request)).await
             }
             "mentisdb_append_retrospective" => {
-                parse_and_call(parameters, |request| {
+                append_retrospective_tool_call(parameters, |request| {
                     self.service.append_retrospective(request)
                 })
                 .await
@@ -6114,6 +6114,58 @@ where
 {
     let request = serde_json::from_value::<T>(parameters)?;
     Ok(serde_json::to_value(f(request).await?)?)
+}
+
+/// Dispatch helper for `mentisdb_append`: reads the optional `verbose` flag
+/// off the raw parameters, parses the rest into an [`AppendThoughtRequest`],
+/// calls `f`, and projects the response to the terse [`AppendThoughtAck`]
+/// unless `verbose: true` was passed.
+async fn append_tool_call<F, Fut>(
+    parameters: Value,
+    f: F,
+) -> Result<Value, Box<dyn Error + Send + Sync>>
+where
+    F: FnOnce(AppendThoughtRequest) -> Fut,
+    Fut: std::future::Future<
+        Output = Result<AppendThoughtResponse, Box<dyn Error + Send + Sync>>,
+    >,
+{
+    let verbose = parameters
+        .get("verbose")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let request = serde_json::from_value::<AppendThoughtRequest>(parameters)?;
+    let response = f(request).await?;
+    if verbose {
+        Ok(serde_json::to_value(&response)?)
+    } else {
+        Ok(serde_json::to_value(AppendThoughtAck::from_full(&response))?)
+    }
+}
+
+/// Dispatch helper for `mentisdb_append_retrospective`: identical projection
+/// logic to [`append_tool_call`] but over [`AppendRetrospectiveRequest`].
+async fn append_retrospective_tool_call<F, Fut>(
+    parameters: Value,
+    f: F,
+) -> Result<Value, Box<dyn Error + Send + Sync>>
+where
+    F: FnOnce(AppendRetrospectiveRequest) -> Fut,
+    Fut: std::future::Future<
+        Output = Result<AppendThoughtResponse, Box<dyn Error + Send + Sync>>,
+    >,
+{
+    let verbose = parameters
+        .get("verbose")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let request = serde_json::from_value::<AppendRetrospectiveRequest>(parameters)?;
+    let response = f(request).await?;
+    if verbose {
+        Ok(serde_json::to_value(&response)?)
+    } else {
+        Ok(serde_json::to_value(AppendThoughtAck::from_full(&response))?)
+    }
 }
 
 /// Build a boxed `io::Error` for an invalid client-supplied input.

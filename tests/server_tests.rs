@@ -3704,3 +3704,125 @@ fn append_thought_ack_covers_every_server_assigned_field() {
         unknown
     );
 }
+
+// ---------------------------------------------------------------------------
+// MCP terse-append-response tests (T4)
+// ---------------------------------------------------------------------------
+
+/// Spin up an ephemeral `start_servers` pair and return `(mcp_url, rest_url, handles)`.
+/// The caller holds `handles` for the lifetime of the test; dropping it shuts the
+/// servers down (the underlying tokio tasks are aborted when the `JoinHandle`s are
+/// dropped by `MentisDbServerHandles`).
+async fn spawn_test_mcp_server(chain_key: &str) -> (String, String, mentisdb::server::MentisDbServerHandles) {
+    use std::net::SocketAddr;
+    use mentisdb::server::start_servers;
+
+    let dir = unique_chain_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let tls_dir = dir.join("tls");
+
+    let service = MentisDbServiceConfig::new(dir.clone(), chain_key, StorageAdapterKind::Binary);
+
+    let config = MentisDbServerConfig {
+        service,
+        mcp_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+        rest_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+        https_mcp_addr: None,
+        https_rest_addr: None,
+        tls_cert_path: tls_dir.join("cert.pem"),
+        tls_key_path: tls_dir.join("key.pem"),
+        dashboard_addr: None,
+        dashboard_pin: None,
+    };
+
+    let handles = start_servers(config).await.expect("start_servers");
+    let mcp_url = format!("http://{}", handles.mcp.local_addr());
+    let rest_url = format!("http://{}", handles.rest.local_addr());
+    (mcp_url, rest_url, handles)
+}
+
+#[tokio::test]
+async fn mcp_append_returns_terse_ack_by_default() {
+    let (mcp_url, _rest_url, _handles) = spawn_test_mcp_server("terse-probe").await;
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "mentisdb_append",
+            "arguments": {
+                "chain_key": "terse-probe",
+                "agent_id": "probe",
+                "thought_type": "Decision",
+                "content": "terse ack probe"
+            }
+        }
+    });
+    let response: serde_json::Value = tokio::task::spawn_blocking(move || {
+        ureq::post(&mcp_url)
+            .set("content-type", "application/json")
+            .send_string(&body.to_string())
+            .expect("mcp call")
+            .into_json::<serde_json::Value>()
+            .expect("mcp body")
+    })
+    .await
+    .unwrap();
+
+    // MCP wraps tool output in result.content[0].text as a JSON string.
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("mcp tool result text");
+    let payload: serde_json::Value = serde_json::from_str(text).expect("tool result JSON");
+
+    assert!(payload.get("thought").is_none(), "terse response must not echo `thought`");
+    assert!(payload["index"].is_u64(), "index at top level");
+    assert!(payload["hash"].is_string(), "hash at top level");
+    assert!(payload.get("content").is_none(), "terse response must not echo content");
+    assert!(payload["head_hash"].is_string(), "head_hash present");
+}
+
+#[tokio::test]
+async fn mcp_append_verbose_true_restores_full_echo() {
+    let (mcp_url, _rest_url, _handles) = spawn_test_mcp_server("verbose-probe").await;
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "mentisdb_append",
+            "arguments": {
+                "chain_key": "verbose-probe",
+                "agent_id": "probe",
+                "thought_type": "Decision",
+                "content": "verbose echo probe",
+                "verbose": true
+            }
+        }
+    });
+    let response: serde_json::Value = tokio::task::spawn_blocking(move || {
+        ureq::post(&mcp_url)
+            .set("content-type", "application/json")
+            .send_string(&body.to_string())
+            .expect("mcp call")
+            .into_json::<serde_json::Value>()
+            .expect("mcp body")
+    })
+    .await
+    .unwrap();
+
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("mcp tool result text");
+    let payload: serde_json::Value = serde_json::from_str(text).expect("tool result JSON");
+
+    assert!(payload["thought"].is_object(), "verbose=true must return legacy shape");
+    assert_eq!(
+        payload["thought"]["content"].as_str(),
+        Some("verbose echo probe"),
+        "verbose=true should echo content back"
+    );
+    assert!(payload["head_hash"].is_string(), "head_hash still present");
+}
