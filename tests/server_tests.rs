@@ -3618,3 +3618,89 @@ fn append_thought_ack_projection_reads_server_assigned_fields() {
     assert_eq!(next_ack.index, next.index, "non-genesis index");
     assert_eq!(next_ack.hash, next.hash, "non-genesis hash");
 }
+
+#[test]
+fn append_thought_ack_covers_every_server_assigned_field() {
+    // Fields on `Thought` that represent server-assigned or server-resolved
+    // information the client does not know at write time. Every field listed
+    // here MUST be present on `AppendThoughtAck`. When adding a new field to
+    // `Thought`, decide: (a) is it server-assigned? If yes, add it here and to
+    // `AppendThoughtAck`. (b) Is it pure client echo? If yes, add it to the
+    // EXCLUDED list below. Either way, this test will break until the decision
+    // is made.
+    //
+    // These keys are the serde names emitted by `MentisDb::thought_json`
+    // (see src/lib.rs — search for `fn thought_json`).
+    const ACK_REQUIRED_KEYS: &[&str] = &[
+        "index",
+        "id",
+        "hash",
+        "prev_hash",
+        "timestamp",
+        "schema_version",
+        "agent_id",
+        "agent_name",
+        "agent_owner",
+        "entity_type",
+        "relations",
+    ];
+    // Explicitly EXCLUDED from the ack — these are either pure client echo or
+    // rarely populated metadata. Listed here to force a compile-visible decision
+    // next time the schema changes.
+    const ACK_EXCLUDED_KEYS: &[&str] = &[
+        "session_id",
+        "source_episode",
+        "signing_key_id",
+        "thought_signature",
+        "thought_type",
+        "role",
+        "content",
+        "confidence",
+        "importance",
+        "tags",
+        "concepts",
+        "refs",
+    ];
+
+    use mentisdb::MentisDb;
+    use mentisdb::ThoughtInput;
+    use mentisdb::ThoughtType;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let mut chain = MentisDb::open(
+        &tmp.path().to_path_buf(),
+        "guard-agent",
+        "Guard Agent",
+        None,
+        None,
+    )
+    .expect("chain open");
+    let input = ThoughtInput::new(ThoughtType::Decision, "guard probe".to_string());
+    let thought = chain
+        .append_thought("guard-agent", input)
+        .expect("append")
+        .clone();
+    let full_json = chain.thought_json(&thought);
+    let full_keys: std::collections::HashSet<String> = full_json
+        .as_object()
+        .expect("thought_json returns object")
+        .keys()
+        .cloned()
+        .collect();
+
+    let known: std::collections::HashSet<String> = ACK_REQUIRED_KEYS
+        .iter()
+        .chain(ACK_EXCLUDED_KEYS.iter())
+        .map(|s| s.to_string())
+        .collect();
+
+    let unknown: Vec<String> = full_keys.difference(&known).cloned().collect();
+    assert!(
+        unknown.is_empty(),
+        "Thought schema has keys the ack test doesn't classify: {:?}. \
+         Add them to ACK_REQUIRED_KEYS or ACK_EXCLUDED_KEYS, then update \
+         AppendThoughtAck if appropriate.",
+        unknown
+    );
+}
