@@ -23,6 +23,8 @@ triggers:
 
 **READ BEFORE WRITE.** Never skip steps 1–5.
 
+> **Append responses are terse by default.** You get back only server-assigned fields (`index`, `id`, `hash`, `head_hash`, `timestamp`, `schema_version`, `agent_id`, plus any resolved `agent_name`/`agent_owner`/`entity_type`/`relations`). The content you just sent is NOT echoed back. Pass `verbose: true` (MCP tool argument) or `?verbose=true` (REST query) only if you need the full `Thought` for signature verification or client-side caching — otherwise the terse shape is the right default and saves ~55% of the response payload.
+
 ## 💾 SAVE THIS SKILL LOCALLY (MANDATORY)
 
 After every call to `mentisdb_skill_md`, **write the returned content to your harness's global skill store, replacing any older file that is already there**. The on-disk copy must always be the latest version you fetched from the server.
